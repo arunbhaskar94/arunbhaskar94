@@ -1,0 +1,163 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function verified() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return verified()
+        && request.auth.token.email is string
+        && exists(/databases/$(database)/documents/admin_config/singleton)
+        && request.auth.token.email
+          == get(/databases/$(database)/documents/admin_config/singleton).data.adminEmail;
+    }
+
+    function isVerifiedUser(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid))
+        && get(/databases/$(database)/documents/users/$(uid)).data.emailVerified == true;
+    }
+
+    function isChatParticipant(chatId) {
+      return verified()
+        && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+    }
+
+    function messageMatches(chatId, messageId, uid, text) {
+      let message = getAfter(
+        /databases/$(database)/documents/chats/$(chatId)/messages/$(messageId)
+      ).data;
+      return message.senderId == uid
+        && message.text == text
+        && message.at == request.time
+        && message.lastSeenAt == request.time;
+    }
+
+    match /anon_profiles/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['createdAt', 'lastSeenAt', 'deviceHint', 'stats'])
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.lastSeenAt == request.time
+        && request.resource.data.stats.keys().hasOnly([
+          'totalAttempts',
+          'correct',
+          'xp',
+          'level',
+          'streak',
+          'coins'
+        ])
+        && request.resource.data.stats.totalAttempts == 0
+        && request.resource.data.stats.correct == 0
+        && request.resource.data.stats.xp == 0
+        && request.resource.data.stats.level == 1
+        && request.resource.data.stats.streak == 0
+        && request.resource.data.stats.coins == 0;
+      allow update: if isOwner(uid)
+        && request.resource.data.lastSeenAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeenAt', 'deviceHint']);
+      allow delete: if false;
+      match /attempts/{attemptId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+    }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create, update, delete: if false;
+      match /attempts/{attemptId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+    }
+
+    match /questions/{questionId} {
+      allow read, write: if false;
+    }
+
+    match /pyqs/{setId} {
+      allow read, write: if false;
+    }
+
+    match /ai_questions/{questionId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /daily_challenges/{challengeId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /leaderboards/{period} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /chats/{chatId} {
+      allow read: if verified()
+        && request.auth.uid in resource.data.participants;
+      allow create: if verified()
+        && request.resource.data.keys().hasAll(['participants', 'lastMessage', 'createdAt', 'lastSeenAt'])
+        && request.resource.data.keys().hasOnly(['participants', 'lastMessage', 'createdAt', 'lastSeenAt'])
+        && request.resource.data.participants is list
+        && request.resource.data.participants.size() == 2
+        && request.auth.uid in request.resource.data.participants
+        && request.resource.data.participants[0] != request.resource.data.participants[1]
+        && isVerifiedUser(
+          request.resource.data.participants[0] == request.auth.uid
+            ? request.resource.data.participants[1]
+            : request.resource.data.participants[0]
+        )
+        && request.resource.data.lastMessage == null
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.lastSeenAt == request.time;
+      allow update: if isChatParticipant(chatId)
+        && request.resource.data.participants == resource.data.participants
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessage', 'lastSeenAt'])
+        && request.resource.data.lastSeenAt == request.time
+        && request.resource.data.lastMessage is map
+        && request.resource.data.lastMessage.messageId is string
+        && request.resource.data.lastMessage.senderId == request.auth.uid
+        && request.resource.data.lastMessage.text is string
+        && request.resource.data.lastMessage.text.size() > 0
+        && request.resource.data.lastMessage.text.size() <= 2000
+        && request.resource.data.lastMessage.at == request.time
+        && messageMatches(
+          chatId,
+          request.resource.data.lastMessage.messageId,
+          request.auth.uid,
+          request.resource.data.lastMessage.text
+        );
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isChatParticipant(chatId);
+        allow create: if isChatParticipant(chatId)
+          && request.resource.data.keys().hasAll(['text', 'senderId', 'at', 'lastSeenAt'])
+          && request.resource.data.keys().hasOnly(['text', 'senderId', 'at', 'lastSeenAt'])
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000
+          && request.resource.data.at == request.time
+          && request.resource.data.lastSeenAt == request.time
+          && getAfter(/databases/$(database)/documents/chats/$(chatId)).data.lastMessage.messageId == messageId;
+        allow update, delete: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

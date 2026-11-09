@@ -1,0 +1,15 @@
+node_modules/
+.env
+.env.local
+.env*.local
+.next/
+out/
+dist/
+build/
+.firebase/
+*.log
+.DS_Store
+functions/node_modules/
+functions/lib/
+serviceAccountKey.json
+*-firebase-adminsdk-*.json
