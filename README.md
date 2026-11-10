@@ -60,8 +60,9 @@ Add product screenshots to `docs/screenshots/` and replace these placeholders be
 1. Clone the repository and enter the project directory:
 
    ```sh
-   git clone <repository-url>
-   cd my-quiz-app
+git clone https://github.com/arunbhaskar94/arunbhaskar94.git
+cd arunbhaskar94
+pnpm install
    ```
 
 2. Install dependencies:
